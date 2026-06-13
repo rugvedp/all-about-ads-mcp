@@ -23,7 +23,8 @@ def save_results(prefix: str, items: list[dict], meta: dict[str, Any]) -> Path:
         "meta": {
             **meta,
             "saved_at": datetime.now(timezone.utc).isoformat(),
-            "item_count": len(items),
+            # Honour a caller-supplied item_count (e.g. search_google counts URLs, not pages).
+            "item_count": meta.get("item_count", len(items)),
         },
         "items": items,
     }
@@ -101,6 +102,50 @@ def summarize_ig_profiles(items: list[dict]) -> list[dict]:
                 else None,
             }
         )
+    return summaries
+
+
+def summarize_google_ads(items: list[dict]) -> list[dict]:
+    """Compact per-ad summary for Google Ads Transparency Center results."""
+    summaries = []
+    for item in items:
+        summaries.append(
+            {
+                "advertiser": _first(item, "advertiserName", "advertiser", "brand"),
+                "advertiser_id": _first(item, "advertiserId", "advertiser_id"),
+                "headline": _truncate(_first(item, "headline", "title", "adTitle")),
+                "description": _truncate(_first(item, "description", "adDescription", "body")),
+                "format": _first(item, "format", "adFormat", "type"),
+                "regions": _first(item, "regions", "region", "targetedRegion"),
+                "destination_url": _first(item, "destinationUrl", "destination_url", "landingUrl"),
+                "first_shown": _first(item, "firstShown", "first_shown", "startDate"),
+                "last_shown": _first(item, "lastShown", "last_shown", "endDate"),
+                "days_active": _first(item, "daysActive", "days_active"),
+                "ad_url": _first(item, "adTransparencyUrl", "adUrl", "ad_url"),
+            }
+        )
+    return summaries
+
+
+def summarize_google_search(items: list[dict]) -> list[dict]:
+    """Compact per-result summary for Google organic SERP results.
+
+    Each dataset item is one results page; this flattens the nested
+    results[] array into individual per-URL summaries.
+    """
+    summaries = []
+    for page in items:
+        query = _first(page, "search_term", "searchTerm", "query")
+        for result in page.get("results") or []:
+            summaries.append(
+                {
+                    "query": query,
+                    "position": result.get("position"),
+                    "title": result.get("title"),
+                    "url": result.get("url"),
+                    "description": _truncate(result.get("description")),
+                }
+            )
     return summaries
 
 

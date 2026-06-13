@@ -10,7 +10,8 @@ def about() -> str:
     return f"""\
 # all-about-ads MCP server
 
-Scrapes the Facebook (Meta) Ads Library and Instagram profiles via Apify actors.
+Scrapes the Facebook (Meta) Ads Library, Instagram profiles, Google Ads
+Transparency Center, and Google Search via Apify actors.
 
 Scraper runs take 30s to a few minutes. Full results are saved as JSON files in
 {RESULTS_DIR} and tools return a file path plus a compact summary, so the full
@@ -43,6 +44,36 @@ Scrape public Instagram profile data.
 - include_recent_posts: bool, default true
 
 Returns: file_path, result_count, and compact profile summaries.
+
+## Tool: search_google_ads (actor pkJmSVBI83vFyy2r5)
+
+Search the Google Ads Transparency Center by advertiser name, domain, URL, or ID.
+Covers Search, Display, YouTube, and Shopping ads.
+
+- advertisers: list of brand names, domains (e.g. "nike.com"), full URLs, or
+  advertiser IDs starting with "AR" (required); mix formats freely
+- max_ads_per_advertiser: int, default 100 (0 = unlimited)
+- start_date / end_date: YYYY-MM-DD or null
+- region: 2-letter ISO code (e.g. "US", "GB"); null for worldwide
+- political_ads_only: bool, default false
+
+Returns: file_path, result_count, advertisers, and compact ad summaries.
+
+## Tool: search_google (actor 563JCPLOqM1kMmbbP)
+
+Search Google for organic results (no paid ads). Use to research brands,
+find news, and get context about ads you've discovered.
+
+- queries: list of search queries (required)
+- max_pages_per_query: int, default 1 (each page ≈ 10 results)
+- results_per_page: int, default 10 (range 10–100)
+- country_code: 2-letter code controlling Google domain (e.g. "gb" → google.co.uk);
+  null for US (google.com)
+- search_language: language code (e.g. "en", "fr"); null for default
+- quick_date_range: relative date filter — d<N> days, w<N> weeks, m<N> months,
+  y<N> years (e.g. "m6" = past 6 months); null for no date filter
+
+Returns: file_path, result_count, queries, and compact result summaries.
 
 ## Tool: list_saved_results
 

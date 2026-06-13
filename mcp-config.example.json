@@ -1,0 +1,49 @@
+{
+  "_readme": "Replace /absolute/path/to/all-about-ads-mcp with the real path to this repo, and set your Apify token. Then paste the right block into your editor's MCP config file. Run install.sh to have this done automatically.",
+
+  "claude_desktop_cursor_windsurf": {
+    "_config_files": {
+      "claude_desktop_mac": "~/Library/Application Support/Claude/claude_desktop_config.json",
+      "claude_desktop_windows": "%APPDATA%/Claude/claude_desktop_config.json",
+      "cursor_global": "~/.cursor/mcp.json",
+      "cursor_project": ".cursor/mcp.json",
+      "windsurf": "~/.codeium/windsurf/mcp_config.json"
+    },
+    "mcpServers": {
+      "all-about-ads": {
+        "command": "uv",
+        "args": ["run", "--directory", "/absolute/path/to/all-about-ads-mcp", "main.py"],
+        "env": {
+          "APIFY_API_TOKEN": "your_apify_token_here"
+        }
+      }
+    }
+  },
+
+  "vscode_github_copilot": {
+    "_config_file": ".vscode/mcp.json in your workspace root",
+    "servers": {
+      "all-about-ads": {
+        "type": "stdio",
+        "command": "uv",
+        "args": ["run", "--directory", "/absolute/path/to/all-about-ads-mcp", "main.py"],
+        "env": {
+          "APIFY_API_TOKEN": "your_apify_token_here"
+        }
+      }
+    }
+  },
+
+  "docker_any_client": {
+    "_note": "Build with: docker build -t all-about-ads-mcp /absolute/path/to/all-about-ads-mcp",
+    "mcpServers": {
+      "all-about-ads": {
+        "command": "docker",
+        "args": ["run", "--rm", "-i", "-e", "APIFY_API_TOKEN", "all-about-ads-mcp"],
+        "env": {
+          "APIFY_API_TOKEN": "your_apify_token_here"
+        }
+      }
+    }
+  }
+}

@@ -14,14 +14,30 @@ from src.storage import (
     load_results,
     save_results,
     summarize_fb_ads,
+    summarize_google_ads,
+    summarize_google_search,
     summarize_ig_profiles,
 )
 
 FACEBOOK_ADS_ACTOR_ID = "20nRTxLD3a3jIlZbZ"
 INSTAGRAM_PROFILES_ACTOR_ID = "98ivcMaUAxs5pu9tV"
+GOOGLE_ADS_TRANSPARENCY_ACTOR_ID = "pkJmSVBI83vFyy2r5"
+GOOGLE_SEARCH_ACTOR_ID = "563JCPLOqM1kMmbbP"
 
 POLL_INTERVAL_SECONDS = 5
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"}
+INLINE_PREVIEW_LIMIT = 10  # max compact items returned inline; rest are in the saved file
+
+
+def _preview(summaries: list[dict], total: int) -> dict:
+    """Return a capped inline preview + a note when items were truncated."""
+    result: dict[str, Any] = {"items": summaries[:INLINE_PREVIEW_LIMIT]}
+    if total > INLINE_PREVIEW_LIMIT:
+        result["note"] = (
+            f"Showing {INLINE_PREVIEW_LIMIT} of {total}. "
+            "Use read_saved_results to page through the full dataset."
+        )
+    return result
 
 
 def _get_client() -> ApifyClientAsync:
@@ -161,11 +177,12 @@ async def search_facebook_ads(
     )
     await _notify(ctx, f"Saved {len(items)} ads to {file_path}", 1.0)
 
+    summaries = summarize_fb_ads(items)
     return {
         "file_path": str(file_path),
         "result_count": len(items),
         "queries": search_queries,
-        "ads": summarize_fb_ads(items),
+        "ads": _preview(summaries, len(items)),
     }
 
 
@@ -203,10 +220,138 @@ async def scrape_instagram_profiles(
     )
     await _notify(ctx, f"Saved {len(items)} profiles to {file_path}", 1.0)
 
+    summaries = summarize_ig_profiles(items)
     return {
         "file_path": str(file_path),
         "result_count": len(items),
-        "profiles": summarize_ig_profiles(items),
+        "profiles": _preview(summaries, len(items)),
+    }
+
+
+@mcp.tool()
+async def search_google_ads(
+    advertisers: list[str],
+    max_ads_per_advertiser: int = 100,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    region: str | None = None,
+    political_ads_only: bool = False,
+    ctx: Context | None = None,
+) -> dict:
+    """Search the Google Ads Transparency Center for ads by advertiser.
+
+    NOTE: This runs a remote scraper and typically takes 30s to a few minutes.
+    Full results are saved to a JSON file (path returned as `file_path`); only a
+    compact summary is returned here. Use read_saved_results to inspect the
+    full data without flooding the context.
+
+    Args:
+        advertisers: Brand names, domains (e.g. "nike.com"), full URLs, or
+            advertiser IDs starting with "AR" (e.g. "AR01614014350098432001").
+            Mix formats freely — the actor classifies each entry automatically.
+        max_ads_per_advertiser: Maximum ads returned per advertiser (0 = unlimited),
+            default 100.
+        start_date: Earliest first-shown date, YYYY-MM-DD. None for no lower bound.
+        end_date: Latest last-shown date, YYYY-MM-DD. None for no upper bound.
+        region: 2-letter ISO country code to filter by (e.g. "US", "GB").
+            None or blank for worldwide.
+        political_ads_only: Restrict results to political/election ads, default False.
+
+    Returns:
+        {"file_path": ..., "result_count": ..., "advertisers": ..., "ads": [compact summaries]}
+    """
+    run_input = {
+        "advertisers": advertisers,
+        "maxAdsPerAdvertiser": max_ads_per_advertiser,
+        "startDate": start_date,
+        "endDate": end_date,
+        "region": region,
+        "politicalAdsOnly": political_ads_only,
+    }
+    run_input = {k: v for k, v in run_input.items() if v is not None}
+
+    items = await _run_actor(GOOGLE_ADS_TRANSPARENCY_ACTOR_ID, run_input, ctx)
+
+    file_path = save_results(
+        "google_ads",
+        items,
+        meta={"tool": "search_google_ads", "queries": advertisers, "input": run_input},
+    )
+    await _notify(ctx, f"Saved {len(items)} ads to {file_path}", 1.0)
+
+    summaries = summarize_google_ads(items)
+    return {
+        "file_path": str(file_path),
+        "result_count": len(items),
+        "advertisers": advertisers,
+        "ads": _preview(summaries, len(items)),
+    }
+
+
+@mcp.tool()
+async def search_google(
+    queries: list[str],
+    max_pages_per_query: int = 1,
+    results_per_page: int = 10,
+    country_code: str | None = None,
+    search_language: str | None = None,
+    quick_date_range: str | None = None,
+    ctx: Context | None = None,
+) -> dict:
+    """Search Google for organic results to research brands and ads.
+
+    NOTE: This runs a remote scraper and typically takes 30s to a few minutes.
+    Full results are saved to a JSON file (path returned as `file_path`); only a
+    compact summary is returned here. Use read_saved_results to inspect the
+    full data without flooding the context.
+
+    Args:
+        queries: Search queries to run (e.g. ["nike ad strategy 2025"]).
+        max_pages_per_query: Number of result pages per query (each ~10 results),
+            default 1.
+        results_per_page: Results per page (10–100), default 10.
+        country_code: 2-letter code controlling the Google domain used
+            (e.g. "gb" → google.co.uk, "es" → google.es). None for US (google.com).
+        search_language: Language code to filter results by (e.g. "en", "fr").
+        quick_date_range: Relative date filter. Format: d<N> (past N days),
+            w<N> (past N weeks), m<N> (past N months), y<N> (past N years).
+            Examples: "d10", "w2", "m6", "y1". None for no date filter.
+
+    Returns:
+        {"file_path": ..., "result_count": ..., "queries": ..., "results": [compact summaries]}
+    """
+    run_input = {
+        "keyword": "\n".join(queries),  # actor uses "keyword", not "queries"
+        "maxPagesPerQuery": max_pages_per_query,
+        "resultsPerPage": results_per_page,
+        "countryCode": country_code,
+        "searchLanguage": search_language,
+        "quickDateRange": quick_date_range,
+    }
+    run_input = {k: v for k, v in run_input.items() if v is not None}
+
+    items = await _run_actor(GOOGLE_SEARCH_ACTOR_ID, run_input, ctx)
+
+    # Each dataset item is one results page; count individual URLs across all pages.
+    total_results = sum(len(page.get("results") or []) for page in items)
+    file_path = save_results(
+        "google_search",
+        items,
+        meta={
+            "tool": "search_google",
+            "queries": queries,
+            "input": run_input,
+            "item_count": total_results,
+        },
+    )
+    await _notify(ctx, f"Saved {total_results} results ({len(items)} pages) to {file_path}", 1.0)
+
+    summaries = summarize_google_search(items)
+    return {
+        "file_path": str(file_path),
+        "result_count": total_results,
+        "queries": queries,
+        "results": _preview(summaries, len(summaries)),
     }
 
 

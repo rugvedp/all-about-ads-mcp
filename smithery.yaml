@@ -1,0 +1,21 @@
+# Smithery configuration — https://smithery.ai/docs/build/project-config/smithery.yaml
+
+startCommand:
+  type: stdio
+  configSchema:
+    type: object
+    required:
+      - apifyApiToken
+    properties:
+      apifyApiToken:
+        type: string
+        title: Apify API Token
+        description: >
+          Your Apify API token. Get it free at
+          https://console.apify.com/account/integrations
+  commandFunction: |-
+    (config) => ({
+      command: "uv",
+      args: ["run", "main.py"],
+      env: { APIFY_API_TOKEN: config.apifyApiToken }
+    })
