@@ -7,5 +7,3 @@ services:
         sync: false
       - key: MCP_TRANSPORT
         value: streamable-http
-      - key: PORT
-        generateValue: true

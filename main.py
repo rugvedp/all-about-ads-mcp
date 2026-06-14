@@ -16,7 +16,7 @@ def main() -> None:
     transport = os.getenv("MCP_TRANSPORT", "stdio")
     if transport == "streamable-http":
         port = int(os.getenv("PORT", "8000"))
-        mcp.run(transport=transport, port=port)
+        mcp.run(transport=transport, host="0.0.0.0", port=port)
     else:
         mcp.run(transport=transport)
 
