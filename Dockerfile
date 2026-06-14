@@ -14,7 +14,8 @@ RUN uv sync --frozen --no-dev
 COPY src/ ./src/
 COPY main.py ./
 
-# MCP communicates over stdio — no network port is exposed
 ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8000
 
 ENTRYPOINT ["uv", "run", "main.py"]

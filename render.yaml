@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: all-about-ads-mcp
+    runtime: docker
+    envVars:
+      - key: APIFY_API_TOKEN
+        sync: false
+      - key: MCP_TRANSPORT
+        value: streamable-http
+      - key: PORT
+        generateValue: true

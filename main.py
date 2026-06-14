@@ -14,7 +14,11 @@ import src.resources  # noqa: F401  (registers resources on the server)
 
 def main() -> None:
     transport = os.getenv("MCP_TRANSPORT", "stdio")
-    mcp.run(transport=transport)
+    if transport == "streamable-http":
+        port = int(os.getenv("PORT", "8000"))
+        mcp.run(transport=transport, port=port)
+    else:
+        mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
