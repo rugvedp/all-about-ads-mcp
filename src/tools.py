@@ -11,7 +11,9 @@ from mcp.server.fastmcp import Context
 from src.server import mcp
 from src.storage import (
     RESULTS_DIR,
+    load_pending_run,
     load_results,
+    save_pending_run,
     save_results,
     summarize_fb_ads,
     summarize_google_ads,
@@ -26,7 +28,7 @@ GOOGLE_SEARCH_ACTOR_ID = "563JCPLOqM1kMmbbP"
 
 POLL_INTERVAL_SECONDS = 5
 TERMINAL_STATUSES = {"SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"}
-INLINE_PREVIEW_LIMIT = 10  # max compact items returned inline; rest are in the saved file
+INLINE_PREVIEW_LIMIT = 5  # max compact items returned inline; rest are in the saved file
 
 
 def _preview(summaries: list[dict], total: int) -> dict:
@@ -60,6 +62,39 @@ async def _notify(ctx: Context | None, message: str, progress: float | None = No
             await ctx.report_progress(progress, total=1.0, message=message)
     except Exception:
         pass
+
+
+async def _start_actor_nonblocking(
+    actor_id: str, run_input: dict[str, Any], ctx: Context | None
+) -> str:
+    """Start an Apify actor and return the run ID immediately without waiting."""
+    client = _get_client()
+    run = await client.actor(actor_id).start(run_input=run_input)
+    await _notify(ctx, f"Apify run {run.id} started in background — call check_run_status to monitor.")
+    return run.id
+
+
+async def _collect_actor_results(run_id: str, ctx: Context | None) -> list[dict]:
+    """Fetch results from an already-completed Apify run (no polling)."""
+    client = _get_client()
+    run = await client.run(run_id).get()
+    if run is None:
+        raise RuntimeError(f"Apify run {run_id} not found.")
+    if str(run.status) not in TERMINAL_STATUSES:
+        raise RuntimeError(
+            f"Run {run_id} is not finished yet (status: {run.status}). "
+            "Call check_run_status first."
+        )
+    if str(run.status) != "SUCCEEDED":
+        raise RuntimeError(f"Run {run_id} ended with status {run.status}: {run.status_message or ''}")
+
+    await _notify(ctx, f"Fetching results for run {run_id}...", 0.95)
+    dataset = client.dataset(run.default_dataset_id)
+    items: list[dict] = [item async for item in dataset.iterate_items()]
+    if not items:
+        await asyncio.sleep(POLL_INTERVAL_SECONDS)
+        items = [item async for item in dataset.iterate_items()]
+    return items
 
 
 async def _run_actor(
@@ -433,4 +468,205 @@ def read_saved_results(
         "offset": offset,
         "returned": len(page),
         "items": page,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Non-blocking (fire-and-forget) variants
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def start_facebook_ads_scrape(
+    search_queries: list[str],
+    max_results_per_query: int = 10,
+    enrich_with_ad_details: bool = False,
+    sort_by: str = "SORT_BY_TOTAL_IMPRESSIONS",
+    country: str | None = None,
+    content_languages: list[str] | None = None,
+    publisher_platforms: list[str] | None = None,
+    active_status: str = "ALL",
+    ad_type: str = "ALL",
+    media_type: str = "ALL",
+    start_date: str | None = None,
+    end_date: str | None = None,
+    ctx: Context | None = None,
+) -> dict:
+    """Start a Facebook Ads Library scrape and return immediately with a run_id.
+
+    Unlike search_facebook_ads, this does NOT wait for the scrape to finish.
+    Use check_run_status to monitor progress, then collect_scrape_results to
+    retrieve the data once the run has SUCCEEDED. This lets you kick off multiple
+    scrapers in parallel and do other work (e.g. search_google) in the meantime.
+
+    Args: same as search_facebook_ads.
+
+    Returns:
+        {"run_id": ..., "status": "RUNNING", "hint": "..."}
+    """
+    run_input = {
+        "searchQueries": search_queries,
+        "maxResultsPerQuery": max(max_results_per_query, 10),
+        "enrichWithAdDetails": enrich_with_ad_details,
+        "sortBy": sort_by,
+        "countries": country,
+        "contentLanguages": content_languages,
+        "publisherPlatforms": publisher_platforms,
+        "activeStatus": active_status,
+        "adType": ad_type,
+        "mediaType": media_type,
+        "startDate": start_date,
+        "endDate": end_date,
+    }
+    run_input = {k: v for k, v in run_input.items() if v is not None}
+    run_id = await _start_actor_nonblocking(FACEBOOK_ADS_ACTOR_ID, run_input, ctx)
+    save_pending_run(run_id, "fb_ads", search_queries, run_input)
+    return {
+        "run_id": run_id,
+        "status": "RUNNING",
+        "hint": "Call check_run_status([run_id]) to monitor, then collect_scrape_results(run_id) when SUCCEEDED.",
+    }
+
+
+@mcp.tool()
+async def start_google_ads_scrape(
+    advertisers: list[str],
+    max_ads_per_advertiser: int = 100,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    region: str | None = None,
+    political_ads_only: bool = False,
+    ctx: Context | None = None,
+) -> dict:
+    """Start a Google Ads Transparency Center scrape and return immediately with a run_id.
+
+    Unlike search_google_ads, this does NOT wait for the scrape to finish.
+    Use check_run_status to monitor progress, then collect_scrape_results to
+    retrieve the data once the run has SUCCEEDED.
+
+    Args: same as search_google_ads.
+
+    Returns:
+        {"run_id": ..., "status": "RUNNING", "hint": "..."}
+    """
+    run_input = {
+        "advertisers": advertisers,
+        "maxAdsPerAdvertiser": max_ads_per_advertiser,
+        "startDate": start_date,
+        "endDate": end_date,
+        "region": region,
+        "politicalAdsOnly": political_ads_only,
+    }
+    run_input = {k: v for k, v in run_input.items() if v is not None}
+    run_id = await _start_actor_nonblocking(GOOGLE_ADS_TRANSPARENCY_ACTOR_ID, run_input, ctx)
+    save_pending_run(run_id, "google_ads", advertisers, run_input)
+    return {
+        "run_id": run_id,
+        "status": "RUNNING",
+        "hint": "Call check_run_status([run_id]) to monitor, then collect_scrape_results(run_id) when SUCCEEDED.",
+    }
+
+
+@mcp.tool()
+async def start_instagram_scrape(
+    profiles: list[str],
+    include_recent_posts: bool = True,
+    ctx: Context | None = None,
+) -> dict:
+    """Start an Instagram profile scrape and return immediately with a run_id.
+
+    Unlike scrape_instagram_profiles, this does NOT wait for the scrape to finish.
+    Use check_run_status to monitor progress, then collect_scrape_results to
+    retrieve the data once the run has SUCCEEDED.
+
+    Args: same as scrape_instagram_profiles.
+
+    Returns:
+        {"run_id": ..., "status": "RUNNING", "hint": "..."}
+    """
+    run_input = {"profiles": profiles, "includeRecentPosts": include_recent_posts}
+    run_id = await _start_actor_nonblocking(INSTAGRAM_PROFILES_ACTOR_ID, run_input, ctx)
+    save_pending_run(run_id, "ig_profiles", profiles, run_input)
+    return {
+        "run_id": run_id,
+        "status": "RUNNING",
+        "hint": "Call check_run_status([run_id]) to monitor, then collect_scrape_results(run_id) when SUCCEEDED.",
+    }
+
+
+@mcp.tool()
+async def check_run_status(run_ids: list[str]) -> list[dict]:
+    """Check the current status of one or more background Apify scrape runs.
+
+    Args:
+        run_ids: List of run IDs returned by start_facebook_ads_scrape,
+            start_google_ads_scrape, or start_instagram_scrape.
+
+    Returns:
+        List of {"run_id": ..., "status": ..., "done": bool, "succeeded": bool}
+    """
+    client = _get_client()
+    results = []
+    for run_id in run_ids:
+        run = await client.run(run_id).get()
+        if run is None:
+            results.append({"run_id": run_id, "status": "NOT_FOUND", "done": True, "succeeded": False})
+        else:
+            status = str(run.status)
+            results.append({
+                "run_id": run_id,
+                "status": status,
+                "done": status in TERMINAL_STATUSES,
+                "succeeded": status == "SUCCEEDED",
+            })
+    return results
+
+
+@mcp.tool()
+async def collect_scrape_results(run_id: str, ctx: Context | None = None) -> dict:
+    """Collect and save results from a completed background scrape run.
+
+    The run must have SUCCEEDED (check with check_run_status first). Results are
+    saved to a file and a compact summary is returned inline, identical to the
+    blocking search_* / scrape_* tools.
+
+    Args:
+        run_id: The run ID returned by start_facebook_ads_scrape,
+            start_google_ads_scrape, or start_instagram_scrape.
+
+    Returns:
+        {"file_path": ..., "result_count": ..., "items": [compact summaries]}
+    """
+    pending = load_pending_run(run_id)
+    if not pending:
+        raise ValueError(
+            f"No metadata found for run {run_id}. "
+            "Only runs started via start_facebook_ads_scrape / start_google_ads_scrape / "
+            "start_instagram_scrape are tracked."
+        )
+
+    items = await _collect_actor_results(run_id, ctx)
+    run_type: str = pending["type"]
+    queries: list = pending["queries"]
+    run_input: dict = pending["input"]
+
+    summarizers = {
+        "fb_ads": summarize_fb_ads,
+        "google_ads": summarize_google_ads,
+        "ig_profiles": summarize_ig_profiles,
+    }
+    summarize = summarizers.get(run_type, lambda x: x)
+    summaries = summarize(items)
+
+    file_path = save_results(
+        run_type,
+        items,
+        meta={"tool": f"start_{run_type}_scrape", "queries": queries, "input": run_input},
+    )
+    await _notify(ctx, f"Saved {len(items)} items to {file_path}", 1.0)
+
+    return {
+        "file_path": str(file_path),
+        "result_count": len(items),
+        "queries": queries,
+        "items": _preview(summaries, len(items)),
     }

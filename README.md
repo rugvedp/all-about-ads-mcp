@@ -6,6 +6,12 @@ Powered by [Apify](https://apify.com/) actors. Works with any MCP-compatible cli
 
 ---
 
+## Demo
+
+![Demo](assets/demo.gif)
+
+---
+
 ## Why this MCP exists
 
 A base AI model can tell you what lululemon's *general* marketing strategy looks like — based on articles it was trained on, months ago. It cannot tell you:
@@ -25,44 +31,23 @@ This MCP fetches **live truth**, not remembered facts.
 | Time an ad has been running | Unknown | Exact (`days_active` field) |
 | New market ad landscape | Outdated | Real-time, filterable by country |
 | Verify if brand is advertising | Assumption | Confirmed fact |
+| Research speed | One query at a time | Tools run in parallel — hundreds of ads across platforms in minutes |
 
 ---
 
 ## Platform coverage
 
-```mermaid
-graph LR
-    MCP["all-about-ads MCP"]
-
-    MCP --> FB["📘 Facebook Ads Library\nsearch_facebook_ads"]
-    MCP --> IG["📸 Instagram Profiles\nscrape_instagram_profiles"]
-    MCP --> GA["🔍 Google Ads Transparency\nsearch_google_ads"]
-    MCP --> GS["🌐 Google Search (SERP)\nsearch_google"]
-
-    FB --> FBData["Ad copy · CTA · dates\nactive status · link URLs"]
-    IG --> IGData["Followers · bio · posts\nverified status"]
-    GA --> GAData["Headlines · format · regions\ndestination URL · days active"]
-    GS --> GSData["Organic results · snippets\nposition · knowledge panel"]
-```
+![Platform coverage diagram](assets/diagram-platform-coverage.png)
 
 ---
 
 ## How results are handled
 
+Tools run in parallel — an AI agent can fire off Facebook, Google, and Instagram scrapers simultaneously rather than waiting for each one to finish before starting the next. That's why a full multi-platform research session completes in minutes, not hours.
+
 Scraper runs take 30 seconds to a few minutes. Raw payloads can be enormous, so the architecture keeps the AI's context window safe:
 
-```mermaid
-flowchart TD
-    A["AI calls a tool\ne.g. search_google_ads"] --> B["Apify actor starts\n(pkJmSVBI83vFyy2r5)"]
-    B --> C["MCP polls every 5s\nemits progress notifications"]
-    C --> D{"Run complete?"}
-    D -- No --> C
-    D -- Yes --> E["Full dataset fetched\nfrom Apify"]
-    E --> F["All items saved to\n/tmp/all-about-ads-mcp/*.json"]
-    F --> G["Compact summary built\n≤ 10 items inline"]
-    G --> H["Tool returns:\nfile_path + result_count\n+ compact preview + note"]
-    H --> I["AI reads preview\nuses read_saved_results\nto page through the rest"]
-```
+![Results handling diagram](assets/diagram-results-handling.png)
 
 Full results are never sent to the model in one shot. The preview gives enough signal; `read_saved_results` provides paginated, filterable access to the rest.
 
@@ -74,24 +59,7 @@ Full results are never sent to the model in one shot. The preview gives enough s
 
 An agency pitching a new client can build a full picture in minutes instead of days:
 
-```mermaid
-sequenceDiagram
-    participant AI
-    participant MCP
-    participant Apify
-
-    AI->>MCP: search_facebook_ads(["competitor"])
-    AI->>MCP: search_google_ads(["competitor.com"])
-    AI->>MCP: search_google(["competitor news 2026"])
-    AI->>MCP: scrape_instagram_profiles(["competitor_handle"])
-
-    MCP->>Apify: 4 parallel actor runs
-    Apify-->>MCP: live ad data, SERP results, profile
-    MCP-->>AI: compact previews + 4 saved files
-
-    AI->>AI: synthesise: current copy, CTAs,\nplatform strategy, recent news
-    AI-->>User: structured competitive brief
-```
+![Competitive intelligence diagram](assets/diagram-competitive-intelligence.png)
 
 No base AI can give you what's *actually running today* across all three platforms simultaneously.
 
@@ -101,13 +69,7 @@ No base AI can give you what's *actually running today* across all three platfor
 
 The `days_active` field in Google Ads shows exactly how long each creative has been live. An ad running for **1,000+ days** is a proven, high-converting asset. Use this to find what competitors refuse to turn off:
 
-```mermaid
-flowchart LR
-    A["search_google_ads\nlululemon.com\nmax_ads=100"] --> B["read_saved_results\nfields=['headline','days_active','format']"]
-    B --> C["AI sorts by days_active desc"]
-    C --> D["Top performers:\n1114 days · text\n198 days · text\n73 days · video"]
-    D --> E["Insight: what copy\nis so good they never\nchange it"]
-```
+![Evergreen ad detection diagram](assets/diagram-evergreen-detection.png)
 
 ---
 
@@ -115,16 +77,7 @@ flowchart LR
 
 Before entering a new market, check who's already advertising there:
 
-```mermaid
-flowchart TD
-    Q["Is the UAE yoga apparel\nmarket competitive?"]
-    Q --> A["search_facebook_ads\nyoga activewear\ncountry=AE"]
-    Q --> B["search_google_ads\nyoga apparel\nregion=AE"]
-    A --> C{Active ads found?}
-    B --> C
-    C -- Yes --> D["List advertisers\nanalse copy angles\nidentify gaps"]
-    C -- No --> E["Low competition signal\nopportunity identified"]
-```
+![Market entry gap analysis diagram](assets/diagram-market-entry.png)
 
 A base AI would guess based on 2023 data. This gives real-time confirmation.
 
@@ -134,24 +87,7 @@ A base AI would guess based on 2023 data. This gives real-time confirmation.
 
 When a brand faces a scandal, do they pull ads or keep running? Track it in real time:
 
-```mermaid
-sequenceDiagram
-    participant Researcher
-    participant AI
-    participant MCP
-
-    Researcher->>AI: "Did Brand X pause ads during the recall?"
-
-    AI->>MCP: search_google(["brand X recall news"])
-    MCP-->>AI: news articles + dates
-
-    AI->>MCP: search_facebook_ads(["brand X"])
-    MCP-->>AI: ads with start_date / end_date
-
-    AI->>AI: cross-reference news dates\nvs ad start/end dates
-
-    AI-->>Researcher: "Ads paused on [date],\nresumed [N] days later\nwith changed messaging"
-```
+![PR crisis correlation diagram](assets/diagram-pr-crisis.png)
 
 ---
 
@@ -159,15 +95,7 @@ sequenceDiagram
 
 Pull 100 ads from a fast-growing brand and let the AI find the formula:
 
-```mermaid
-flowchart LR
-    A["search_facebook_ads\nbrand · max=100"] --> B["read_saved_results\noffset=0 limit=100"]
-    B --> C["AI analysis"]
-    C --> D["Format split\n60% video · 30% image · 10% text"]
-    C --> E["Top CTAs\nShop now · Learn more · Get offer"]
-    C --> F["Headline patterns\nPrice anchoring · Urgency · Social proof"]
-    C --> G["Active vs Inactive\n40% still running"]
-```
+![Ad creative pattern analysis diagram](assets/diagram-creative-analysis.png)
 
 This requires structured bulk data to reason over — not 3 examples recalled from training.
 
@@ -177,13 +105,7 @@ This requires structured bulk data to reason over — not 3 examples recalled fr
 
 Track political advertising by region with verifiable, primary-source data:
 
-```mermaid
-flowchart TD
-    A["search_google_ads\nadvertisers=['candidate name']\npolitical_ads_only=True\nregion='US'"]
-    A --> B["Real ad copy\nrunning in that region"]
-    B --> C["search_google\ncandidate name policy ads 2026"]
-    C --> D["Cross-reference:\nwhat they say in ads\nvs what press reports"]
-```
+![Political ad transparency diagram](assets/diagram-political-ads.png)
 
 ---
 
@@ -191,22 +113,7 @@ flowchart TD
 
 The complete workflow an AI agent can run autonomously:
 
-```mermaid
-flowchart TD
-    Start(["Research: brand X"]) --> FB["search_facebook_ads\ncurrent creative + CTAs"]
-    Start --> GA["search_google_ads\nsearch ad copy + formats"]
-    Start --> IG["scrape_instagram_profiles\naudience size + bio"]
-    Start --> GS["search_google\nnews + strategy articles"]
-
-    FB --> Save["All results saved\nto /tmp files"]
-    GA --> Save
-    IG --> Save
-    GS --> Save
-
-    Save --> Read["read_saved_results\npage through full data\napply filters & field projection"]
-    Read --> Synth["AI synthesises:\n• Platform strategy\n• Messaging angles\n• Creative formats\n• Market position\n• Recent activity"]
-    Synth --> Report(["Structured report\ndelivered to user"])
-```
+![Full brand research loop diagram](assets/diagram-full-brand-loop.png)
 
 ---
 
