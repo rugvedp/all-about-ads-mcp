@@ -17,5 +17,5 @@ startCommand:
     (config) => ({
       command: "uv",
       args: ["run", "main.py"],
-      env: { APIFY_API_TOKEN: config.apifyApiToken }
+      env: { APIFY_API_TOKEN: config.apifyApiToken, MCP_TRANSPORT: "stdio" }
     })

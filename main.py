@@ -1,5 +1,6 @@
-"""Entry point for the all-about-ads MCP server (stdio transport)."""
+"""Entry point for the all-about-ads MCP server."""
 
+import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -12,7 +13,8 @@ import src.resources  # noqa: F401  (registers resources on the server)
 
 
 def main() -> None:
-    mcp.run()
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
