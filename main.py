@@ -7,6 +7,12 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent / ".env")
 
+# Must be set before FastMCP() is constructed (happens at src.server import time).
+# FASTMCP_ prefix is read by pydantic-settings inside FastMCP.
+if os.getenv("MCP_TRANSPORT") == "streamable-http":
+    os.environ.setdefault("FASTMCP_HOST", "0.0.0.0")
+    os.environ.setdefault("FASTMCP_PORT", os.getenv("PORT", "8000"))
+
 from src.server import mcp
 import src.tools  # noqa: F401  (registers tools on the server)
 import src.resources  # noqa: F401  (registers resources on the server)
@@ -14,11 +20,7 @@ import src.resources  # noqa: F401  (registers resources on the server)
 
 def main() -> None:
     transport = os.getenv("MCP_TRANSPORT", "stdio")
-    if transport == "streamable-http":
-        port = int(os.getenv("PORT", "8000"))
-        mcp.run(transport=transport, host="0.0.0.0", port=port)
-    else:
-        mcp.run(transport=transport)
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":
