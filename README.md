@@ -1,5 +1,7 @@
 # all-about-ads-mcp
 
+[![smithery badge](https://smithery.ai/badge/rugvedp/all-about-ads-mcp)](https://smithery.ai/servers/rugvedp/all-about-ads-mcp)
+
 An MCP (Model Context Protocol) server that gives AI agents **live, structured ad intelligence** across Facebook, Google, and Instagram — data that no base model can produce from training alone.
 
 Powered by [Apify](https://apify.com/) actors. Works with any MCP-compatible client: Cursor, Claude, etc.
