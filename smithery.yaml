@@ -1,5 +1,7 @@
 # Smithery configuration — https://smithery.ai/docs/build/project-config/smithery.yaml
 
+iconUrl: https://cdn.simpleicons.org/meta/0866FF
+
 startCommand:
   type: stdio
   configSchema:

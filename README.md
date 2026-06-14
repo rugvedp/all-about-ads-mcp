@@ -321,8 +321,8 @@ Returns: `file_path`, `result_count`, `advertisers`, `ads` (compact preview with
 
 ---
 
-### `scrape_instagram_profiles`
-Scrape public Instagram profile data.
+### `search_instagram_profiles`
+Fetch public Instagram profile data including follower counts, bio, and recent posts.
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|

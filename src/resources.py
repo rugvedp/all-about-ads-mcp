@@ -36,9 +36,9 @@ Search ads by keyword/brand. Key parameters and accepted values:
 
 Returns: file_path, result_count, queries, and compact ad summaries.
 
-## Tool: scrape_instagram_profiles (actor 98ivcMaUAxs5pu9tV)
+## Tool: search_instagram_profiles (actor 98ivcMaUAxs5pu9tV)
 
-Scrape public Instagram profile data.
+Fetch public Instagram profile data including follower counts, bio, and recent posts.
 
 - profiles: list of usernames (required), e.g. ["natgeo", "nike"]
 - include_recent_posts: bool, default true

@@ -3,10 +3,13 @@
 import asyncio
 import json
 import os
-from typing import Any
+from typing import Annotated, Any
+from typing_extensions import TypedDict
 
 from apify_client import ApifyClientAsync
 from mcp.server.fastmcp import Context
+from mcp.types import ToolAnnotations
+from pydantic import Field
 
 from src.server import mcp
 from src.storage import (
@@ -20,6 +23,55 @@ from src.storage import (
     summarize_google_search,
     summarize_ig_profiles,
 )
+
+# ---------------------------------------------------------------------------
+# Output schemas
+# ---------------------------------------------------------------------------
+
+class AdsResult(TypedDict):
+    file_path: str
+    result_count: int
+    queries: list[str]
+    ads: dict
+
+class ProfilesResult(TypedDict):
+    file_path: str
+    result_count: int
+    profiles: dict
+
+class SearchResult(TypedDict):
+    file_path: str
+    result_count: int
+    queries: list[str]
+    results: dict
+
+class SavedFileEntry(TypedDict):
+    file_path: str
+    size_bytes: int
+    tool: str
+    queries: list[str]
+    saved_at: str
+    item_count: int
+
+class SavedResultsPage(TypedDict):
+    meta: dict
+    total_items: int
+    matched_items: int
+    offset: int
+    returned: int
+    items: list[dict]
+
+class RunStarted(TypedDict):
+    run_id: str
+    status: str
+    hint: str
+
+class RunStatus(TypedDict):
+    run_id: str
+    status: str
+    done: bool
+    succeeded: bool
+
 
 FACEBOOK_ADS_ACTOR_ID = "20nRTxLD3a3jIlZbZ"
 INSTAGRAM_PROFILES_ACTOR_ID = "98ivcMaUAxs5pu9tV"
@@ -142,48 +194,27 @@ async def _run_actor(
     return items
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def search_facebook_ads(
-    search_queries: list[str],
-    max_results_per_query: int = 10,
-    enrich_with_ad_details: bool = False,
-    sort_by: str = "SORT_BY_TOTAL_IMPRESSIONS",
-    country: str | None = None,
-    content_languages: list[str] | None = None,
-    publisher_platforms: list[str] | None = None,
-    active_status: str = "ALL",
-    ad_type: str = "ALL",
-    media_type: str = "ALL",
-    start_date: str | None = None,
-    end_date: str | None = None,
+    search_queries: Annotated[list[str], Field(description="Keywords or brand names to search for, e.g. ['nike', 'adidas'].")],
+    max_results_per_query: Annotated[int, Field(description="Maximum ads to return per query. Minimum 10 (actor limit).")] = 10,
+    enrich_with_ad_details: Annotated[bool, Field(description="Fetch extra per-ad details. Slower and uses more Apify credits.")] = False,
+    sort_by: Annotated[str, Field(description="Sort order: SORT_BY_TOTAL_IMPRESSIONS or SORT_BY_RELEVANCY_MONTHLY_GROUPED.")] = "SORT_BY_TOTAL_IMPRESSIONS",
+    country: Annotated[str | None, Field(description="ISO country code to filter by, e.g. 'US', 'IN', or 'ALL'. None for no filter.")] = None,
+    content_languages: Annotated[list[str] | None, Field(description="Language codes to filter ad content by, e.g. ['en', 'fr'].")] = None,
+    publisher_platforms: Annotated[list[str] | None, Field(description="Platforms to filter by, e.g. ['facebook', 'instagram'].")] = None,
+    active_status: Annotated[str, Field(description="Ad status filter: ALL, ACTIVE, or INACTIVE.")] = "ALL",
+    ad_type: Annotated[str, Field(description="Ad type filter: ALL, POLITICAL_AND_ISSUE_ADS, HOUSING_ADS, EMPLOYMENT_ADS, or CREDIT_ADS.")] = "ALL",
+    media_type: Annotated[str, Field(description="Media type filter: ALL, IMAGE, MEME, IMAGE_AND_MEME, VIDEO, or NONE.")] = "ALL",
+    start_date: Annotated[str | None, Field(description="Earliest ad delivery date in YYYY-MM-DD format. None for no lower bound.")] = None,
+    end_date: Annotated[str | None, Field(description="Latest ad delivery date in YYYY-MM-DD format. None for no upper bound.")] = None,
     ctx: Context | None = None,
-) -> dict:
-    """Search the Facebook Ads Library for ads matching the given queries.
+) -> AdsResult:
+    """Search the Facebook Ads Library for live ads matching the given queries.
 
-    NOTE: This runs a remote scraper and typically takes 30s to a few minutes.
-    Full results are saved to a JSON file (path returned as `file_path`); only a
-    compact summary is returned here. Use read_saved_results to inspect the
-    full data without flooding the context.
-
-    Args:
-        search_queries: Keywords or brand names to search for (e.g. ["nike", "adidas"]).
-        max_results_per_query: Maximum number of ads to return per query
-            (the actor requires a minimum of 10).
-        enrich_with_ad_details: Fetch extra details per ad (slower and more expensive).
-        sort_by: Sort order. One of SORT_BY_TOTAL_IMPRESSIONS,
-            SORT_BY_RELEVANCY_MONTHLY_GROUPED.
-        country: Single ISO country code to filter by (e.g. "US", "IN") or "ALL".
-            None for no filter.
-        content_languages: Language codes to filter ad content by (e.g. ["en"]).
-        publisher_platforms: Platforms to filter by (e.g. ["facebook", "instagram"]).
-        active_status: ALL, ACTIVE, or INACTIVE.
-        ad_type: ALL, POLITICAL_AND_ISSUE_ADS, HOUSING_ADS, EMPLOYMENT_ADS, CREDIT_ADS.
-        media_type: ALL, IMAGE, MEME, IMAGE_AND_MEME, VIDEO, NONE.
-        start_date: Earliest ad delivery date, YYYY-MM-DD. None for no lower bound.
-        end_date: Latest ad delivery date, YYYY-MM-DD. None for no upper bound.
-
-    Returns:
-        {"file_path": ..., "result_count": ..., "queries": ..., "ads": [compact summaries]}
+    Runs a remote scraper (30s–few minutes). Full results are saved to a JSON
+    file; only a compact preview is returned inline. Use read_saved_results to
+    page through the full dataset without flooding context.
     """
     run_input = {
         "searchQueries": search_queries,
@@ -221,25 +252,17 @@ async def search_facebook_ads(
     }
 
 
-@mcp.tool()
-async def scrape_instagram_profiles(
-    profiles: list[str],
-    include_recent_posts: bool = True,
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def search_instagram_profiles(
+    profiles: Annotated[list[str], Field(description="Instagram usernames to fetch, e.g. ['natgeo', 'nike'].")],
+    include_recent_posts: Annotated[bool, Field(description="Also fetch each profile's recent posts (captions, likes, timestamps).")] = True,
     ctx: Context | None = None,
-) -> dict:
-    """Scrape public Instagram profile data (and optionally recent posts).
+) -> ProfilesResult:
+    """Fetch public Instagram profile data including follower counts, bio, and recent posts.
 
-    NOTE: This runs a remote scraper and typically takes 30s to a few minutes.
-    Full results are saved to a JSON file (path returned as `file_path`); only a
-    compact summary is returned here. Use read_saved_results to inspect the
-    full data without flooding the context.
-
-    Args:
-        profiles: Instagram usernames to scrape (e.g. ["natgeo", "nike"]).
-        include_recent_posts: Also fetch each profile's recent posts.
-
-    Returns:
-        {"file_path": ..., "result_count": ..., "profiles": [compact summaries]}
+    Runs a remote scraper (30s–few minutes). Full results are saved to a JSON
+    file; only a compact preview is returned inline. Use read_saved_results to
+    page through the full dataset without flooding context.
     """
     run_input = {
         "profiles": profiles,
@@ -251,7 +274,7 @@ async def scrape_instagram_profiles(
     file_path = save_results(
         "ig_profiles",
         items,
-        meta={"tool": "scrape_instagram_profiles", "queries": profiles, "input": run_input},
+        meta={"tool": "search_instagram_profiles", "queries": profiles, "input": run_input},
     )
     await _notify(ctx, f"Saved {len(items)} profiles to {file_path}", 1.0)
 
@@ -263,37 +286,22 @@ async def scrape_instagram_profiles(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def search_google_ads(
-    advertisers: list[str],
-    max_ads_per_advertiser: int = 100,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    region: str | None = None,
-    political_ads_only: bool = False,
+    advertisers: Annotated[list[str], Field(description="Brand names, domains (e.g. 'nike.com'), full URLs, or advertiser IDs starting with 'AR'. Mix formats freely.")],
+    max_ads_per_advertiser: Annotated[int, Field(description="Maximum ads returned per advertiser. 0 means unlimited.")] = 100,
+    start_date: Annotated[str | None, Field(description="Earliest first-shown date in YYYY-MM-DD format. None for no lower bound.")] = None,
+    end_date: Annotated[str | None, Field(description="Latest last-shown date in YYYY-MM-DD format. None for no upper bound.")] = None,
+    region: Annotated[str | None, Field(description="2-letter ISO country code to filter by, e.g. 'US', 'GB'. None for worldwide.")] = None,
+    political_ads_only: Annotated[bool, Field(description="Restrict results to political and election ads only.")] = False,
     ctx: Context | None = None,
-) -> dict:
-    """Search the Google Ads Transparency Center for ads by advertiser.
+) -> AdsResult:
+    """Search the Google Ads Transparency Center for live ads by advertiser name or domain.
 
-    NOTE: This runs a remote scraper and typically takes 30s to a few minutes.
-    Full results are saved to a JSON file (path returned as `file_path`); only a
-    compact summary is returned here. Use read_saved_results to inspect the
-    full data without flooding the context.
-
-    Args:
-        advertisers: Brand names, domains (e.g. "nike.com"), full URLs, or
-            advertiser IDs starting with "AR" (e.g. "AR01614014350098432001").
-            Mix formats freely — the actor classifies each entry automatically.
-        max_ads_per_advertiser: Maximum ads returned per advertiser (0 = unlimited),
-            default 100.
-        start_date: Earliest first-shown date, YYYY-MM-DD. None for no lower bound.
-        end_date: Latest last-shown date, YYYY-MM-DD. None for no upper bound.
-        region: 2-letter ISO country code to filter by (e.g. "US", "GB").
-            None or blank for worldwide.
-        political_ads_only: Restrict results to political/election ads, default False.
-
-    Returns:
-        {"file_path": ..., "result_count": ..., "advertisers": ..., "ads": [compact summaries]}
+    Returns headlines, formats, regions, days_active, and destination URLs.
+    Runs a remote scraper (30s–few minutes). Full results are saved to a JSON
+    file; only a compact preview is returned inline. Use read_saved_results to
+    page through the full dataset without flooding context.
     """
     run_input = {
         "advertisers": advertisers,
@@ -323,37 +331,21 @@ async def search_google_ads(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
 async def search_google(
-    queries: list[str],
-    max_pages_per_query: int = 1,
-    results_per_page: int = 10,
-    country_code: str | None = None,
-    search_language: str | None = None,
-    quick_date_range: str | None = None,
+    queries: Annotated[list[str], Field(description="Search queries to run, e.g. ['nike ad strategy 2025', 'adidas campaign news'].")],
+    max_pages_per_query: Annotated[int, Field(description="Number of result pages per query. Each page contains ~10 results.")] = 1,
+    results_per_page: Annotated[int, Field(description="Results per page, between 10 and 100.")] = 10,
+    country_code: Annotated[str | None, Field(description="2-letter country code controlling the Google domain, e.g. 'gb' → google.co.uk. None uses google.com.")] = None,
+    search_language: Annotated[str | None, Field(description="Language code to filter results by, e.g. 'en', 'fr', 'de'.")] = None,
+    quick_date_range: Annotated[str | None, Field(description="Relative date filter: d<N> (days), w<N> (weeks), m<N> (months), y<N> (years). E.g. 'd10', 'w2', 'm6'.")] = None,
     ctx: Context | None = None,
-) -> dict:
-    """Search Google for organic results to research brands and ads.
+) -> SearchResult:
+    """Search Google for organic results to research brands, news, and ad context.
 
-    NOTE: This runs a remote scraper and typically takes 30s to a few minutes.
-    Full results are saved to a JSON file (path returned as `file_path`); only a
-    compact summary is returned here. Use read_saved_results to inspect the
-    full data without flooding the context.
-
-    Args:
-        queries: Search queries to run (e.g. ["nike ad strategy 2025"]).
-        max_pages_per_query: Number of result pages per query (each ~10 results),
-            default 1.
-        results_per_page: Results per page (10–100), default 10.
-        country_code: 2-letter code controlling the Google domain used
-            (e.g. "gb" → google.co.uk, "es" → google.es). None for US (google.com).
-        search_language: Language code to filter results by (e.g. "en", "fr").
-        quick_date_range: Relative date filter. Format: d<N> (past N days),
-            w<N> (past N weeks), m<N> (past N months), y<N> (past N years).
-            Examples: "d10", "w2", "m6", "y1". None for no date filter.
-
-    Returns:
-        {"file_path": ..., "result_count": ..., "queries": ..., "results": [compact summaries]}
+    Runs a remote scraper (30s–few minutes). Full results are saved to a JSON
+    file; only a compact preview is returned inline. Use read_saved_results to
+    page through the full dataset without flooding context.
     """
     run_input = {
         "keyword": "\n".join(queries),  # actor uses "keyword", not "queries"
@@ -390,12 +382,12 @@ async def search_google(
     }
 
 
-@mcp.tool()
-def list_saved_results() -> list[dict]:
-    """List previously saved result files (from earlier scraper runs).
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+def list_saved_results() -> list[SavedFileEntry]:
+    """List all result files saved from previous scraper runs.
 
-    Returns one entry per file with its path, size, item count, and the tool /
-    queries that produced it. Use read_saved_results to read items from a file.
+    Returns one entry per file with path, size, item count, tool name, and queries.
+    No Apify call is made — this is instant. Use read_saved_results to read items.
     """
     if not RESULTS_DIR.exists():
         return []
@@ -422,31 +414,18 @@ def list_saved_results() -> list[dict]:
     return entries
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
 def read_saved_results(
-    file_path: str,
-    offset: int = 0,
-    limit: int = 5,
-    fields: list[str] | None = None,
-    query: str | None = None,
-) -> dict:
-    """Read a slice of items from a previously saved results file.
+    file_path: Annotated[str, Field(description="Path returned by a search tool or list_saved_results. A bare filename also works.")],
+    offset: Annotated[int, Field(description="Index of the first item to return. Use with limit to paginate.")] = 0,
+    limit: Annotated[int, Field(description="Maximum number of items to return per call.")] = 5,
+    fields: Annotated[list[str] | None, Field(description="If set, only these top-level keys are included per item. Use to reduce token usage.")] = None,
+    query: Annotated[str | None, Field(description="Case-insensitive substring filter. Only items whose JSON contains this string are returned.")] = None,
+) -> SavedResultsPage:
+    """Read a paginated slice of items from a previously saved scraper results file.
 
-    Results files can be very large, so read them in small pages and/or project
-    only the fields you need.
-
-    Args:
-        file_path: Path returned by search_facebook_ads / scrape_instagram_profiles
-            / list_saved_results (a bare filename also works).
-        offset: Index of the first item to return.
-        limit: Maximum number of items to return.
-        fields: If given, only these top-level keys are included per item.
-        query: Optional case-insensitive substring filter; only items whose
-            JSON representation contains it are returned.
-
-    Returns:
-        {"meta": ..., "total_items": ..., "matched_items": ..., "offset": ...,
-         "returned": ..., "items": [...]}
+    Results files can be very large. Read in small pages and project only the
+    fields you need to stay within context limits.
     """
     data = load_results(file_path)
     items: list[dict] = data["items"]
@@ -475,33 +454,26 @@ def read_saved_results(
 # Non-blocking (fire-and-forget) variants
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True))
 async def start_facebook_ads_scrape(
-    search_queries: list[str],
-    max_results_per_query: int = 10,
-    enrich_with_ad_details: bool = False,
-    sort_by: str = "SORT_BY_TOTAL_IMPRESSIONS",
-    country: str | None = None,
-    content_languages: list[str] | None = None,
-    publisher_platforms: list[str] | None = None,
-    active_status: str = "ALL",
-    ad_type: str = "ALL",
-    media_type: str = "ALL",
-    start_date: str | None = None,
-    end_date: str | None = None,
+    search_queries: Annotated[list[str], Field(description="Keywords or brand names to search for, e.g. ['nike', 'adidas'].")],
+    max_results_per_query: Annotated[int, Field(description="Maximum ads to return per query. Minimum 10 (actor limit).")] = 10,
+    enrich_with_ad_details: Annotated[bool, Field(description="Fetch extra per-ad details. Slower and uses more Apify credits.")] = False,
+    sort_by: Annotated[str, Field(description="Sort order: SORT_BY_TOTAL_IMPRESSIONS or SORT_BY_RELEVANCY_MONTHLY_GROUPED.")] = "SORT_BY_TOTAL_IMPRESSIONS",
+    country: Annotated[str | None, Field(description="ISO country code to filter by, e.g. 'US', 'IN', or 'ALL'. None for no filter.")] = None,
+    content_languages: Annotated[list[str] | None, Field(description="Language codes to filter ad content by, e.g. ['en', 'fr'].")] = None,
+    publisher_platforms: Annotated[list[str] | None, Field(description="Platforms to filter by, e.g. ['facebook', 'instagram'].")] = None,
+    active_status: Annotated[str, Field(description="Ad status filter: ALL, ACTIVE, or INACTIVE.")] = "ALL",
+    ad_type: Annotated[str, Field(description="Ad type filter: ALL, POLITICAL_AND_ISSUE_ADS, HOUSING_ADS, EMPLOYMENT_ADS, or CREDIT_ADS.")] = "ALL",
+    media_type: Annotated[str, Field(description="Media type filter: ALL, IMAGE, MEME, IMAGE_AND_MEME, VIDEO, or NONE.")] = "ALL",
+    start_date: Annotated[str | None, Field(description="Earliest ad delivery date in YYYY-MM-DD format. None for no lower bound.")] = None,
+    end_date: Annotated[str | None, Field(description="Latest ad delivery date in YYYY-MM-DD format. None for no upper bound.")] = None,
     ctx: Context | None = None,
-) -> dict:
-    """Start a Facebook Ads Library scrape and return immediately with a run_id.
+) -> RunStarted:
+    """Start a Facebook Ads Library scrape in the background and return a run_id immediately.
 
-    Unlike search_facebook_ads, this does NOT wait for the scrape to finish.
-    Use check_run_status to monitor progress, then collect_scrape_results to
-    retrieve the data once the run has SUCCEEDED. This lets you kick off multiple
-    scrapers in parallel and do other work (e.g. search_google) in the meantime.
-
-    Args: same as search_facebook_ads.
-
-    Returns:
-        {"run_id": ..., "status": "RUNNING", "hint": "..."}
+    Use this instead of search_facebook_ads when running multiple scrapers in parallel.
+    Call check_run_status to monitor progress, then collect_scrape_results once SUCCEEDED.
     """
     run_input = {
         "searchQueries": search_queries,
@@ -527,26 +499,20 @@ async def start_facebook_ads_scrape(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True))
 async def start_google_ads_scrape(
-    advertisers: list[str],
-    max_ads_per_advertiser: int = 100,
-    start_date: str | None = None,
-    end_date: str | None = None,
-    region: str | None = None,
-    political_ads_only: bool = False,
+    advertisers: Annotated[list[str], Field(description="Brand names, domains (e.g. 'nike.com'), full URLs, or advertiser IDs starting with 'AR'. Mix formats freely.")],
+    max_ads_per_advertiser: Annotated[int, Field(description="Maximum ads returned per advertiser. 0 means unlimited.")] = 100,
+    start_date: Annotated[str | None, Field(description="Earliest first-shown date in YYYY-MM-DD format. None for no lower bound.")] = None,
+    end_date: Annotated[str | None, Field(description="Latest last-shown date in YYYY-MM-DD format. None for no upper bound.")] = None,
+    region: Annotated[str | None, Field(description="2-letter ISO country code to filter by, e.g. 'US', 'GB'. None for worldwide.")] = None,
+    political_ads_only: Annotated[bool, Field(description="Restrict results to political and election ads only.")] = False,
     ctx: Context | None = None,
-) -> dict:
-    """Start a Google Ads Transparency Center scrape and return immediately with a run_id.
+) -> RunStarted:
+    """Start a Google Ads Transparency Center scrape in the background and return a run_id immediately.
 
-    Unlike search_google_ads, this does NOT wait for the scrape to finish.
-    Use check_run_status to monitor progress, then collect_scrape_results to
-    retrieve the data once the run has SUCCEEDED.
-
-    Args: same as search_google_ads.
-
-    Returns:
-        {"run_id": ..., "status": "RUNNING", "hint": "..."}
+    Use this instead of search_google_ads when running multiple scrapers in parallel.
+    Call check_run_status to monitor progress, then collect_scrape_results once SUCCEEDED.
     """
     run_input = {
         "advertisers": advertisers,
@@ -566,22 +532,16 @@ async def start_google_ads_scrape(
     }
 
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True))
 async def start_instagram_scrape(
-    profiles: list[str],
-    include_recent_posts: bool = True,
+    profiles: Annotated[list[str], Field(description="Instagram usernames to fetch, e.g. ['natgeo', 'nike'].")],
+    include_recent_posts: Annotated[bool, Field(description="Also fetch each profile's recent posts (captions, likes, timestamps).")] = True,
     ctx: Context | None = None,
-) -> dict:
-    """Start an Instagram profile scrape and return immediately with a run_id.
+) -> RunStarted:
+    """Start an Instagram profile scrape in the background and return a run_id immediately.
 
-    Unlike scrape_instagram_profiles, this does NOT wait for the scrape to finish.
-    Use check_run_status to monitor progress, then collect_scrape_results to
-    retrieve the data once the run has SUCCEEDED.
-
-    Args: same as scrape_instagram_profiles.
-
-    Returns:
-        {"run_id": ..., "status": "RUNNING", "hint": "..."}
+    Use this instead of search_instagram_profiles when running multiple scrapers in parallel.
+    Call check_run_status to monitor progress, then collect_scrape_results once SUCCEEDED.
     """
     run_input = {"profiles": profiles, "includeRecentPosts": include_recent_posts}
     run_id = await _start_actor_nonblocking(INSTAGRAM_PROFILES_ACTOR_ID, run_input, ctx)
@@ -593,16 +553,14 @@ async def start_instagram_scrape(
     }
 
 
-@mcp.tool()
-async def check_run_status(run_ids: list[str]) -> list[dict]:
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=True))
+async def check_run_status(
+    run_ids: Annotated[list[str], Field(description="Run IDs returned by start_facebook_ads_scrape, start_google_ads_scrape, or start_instagram_scrape.")],
+) -> list[RunStatus]:
     """Check the current status of one or more background Apify scrape runs.
 
-    Args:
-        run_ids: List of run IDs returned by start_facebook_ads_scrape,
-            start_google_ads_scrape, or start_instagram_scrape.
-
-    Returns:
-        List of {"run_id": ..., "status": ..., "done": bool, "succeeded": bool}
+    Returns done and succeeded flags for each run so you know when to call
+    collect_scrape_results.
     """
     client = _get_client()
     results = []
@@ -621,20 +579,16 @@ async def check_run_status(run_ids: list[str]) -> list[dict]:
     return results
 
 
-@mcp.tool()
-async def collect_scrape_results(run_id: str, ctx: Context | None = None) -> dict:
-    """Collect and save results from a completed background scrape run.
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, openWorldHint=True))
+async def collect_scrape_results(
+    run_id: Annotated[str, Field(description="Run ID returned by start_facebook_ads_scrape, start_google_ads_scrape, or start_instagram_scrape.")],
+    ctx: Context | None = None,
+) -> SavedResultsPage:
+    """Collect and save results from a completed background Apify scrape run.
 
-    The run must have SUCCEEDED (check with check_run_status first). Results are
-    saved to a file and a compact summary is returned inline, identical to the
-    blocking search_* / scrape_* tools.
-
-    Args:
-        run_id: The run ID returned by start_facebook_ads_scrape,
-            start_google_ads_scrape, or start_instagram_scrape.
-
-    Returns:
-        {"file_path": ..., "result_count": ..., "items": [compact summaries]}
+    The run must have SUCCEEDED — check with check_run_status first. Results are
+    saved to a file and a compact preview is returned inline, identical to the
+    blocking search_* tools.
     """
     pending = load_pending_run(run_id)
     if not pending:
